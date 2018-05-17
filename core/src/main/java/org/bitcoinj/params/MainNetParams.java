@@ -54,7 +54,7 @@ public class MainNetParams extends AbstractBitcoinNetParams {
         genesisBlock.setTime(1231006505L);
         genesisBlock.setNonce(2083236893);
         id = ID_MAINNET;
-        subsidyDecreaseBlockCount = 210000;
+        subsidyDecreaseBlockCount = 657000;
         spendableCoinbaseDepth = 100;
         String genesisHash = genesisBlock.getHashAsString();
         checkState(genesisHash.equals("000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"),
