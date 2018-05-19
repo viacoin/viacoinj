@@ -23,6 +23,7 @@ import org.bitcoinj.crypto.TransactionSignature;
 import org.bitcoinj.script.Script;
 import org.bitcoinj.script.ScriptBuilder;
 import org.bitcoinj.script.ScriptException;
+import org.bitcoinj.script.ScriptPattern;
 
 import com.google.common.base.Preconditions;
 
@@ -173,10 +174,7 @@ public class FullBlockTestGenerator {
             public boolean add(Rule element) {
                 if (outStream != null && element instanceof BlockAndValidity) {
                     try {
-                        outStream.write((int) (params.getPacketMagic() >>> 24));
-                        outStream.write((int) (params.getPacketMagic() >>> 16));
-                        outStream.write((int) (params.getPacketMagic() >>> 8));
-                        outStream.write((int) params.getPacketMagic());
+                        Utils.uint32ToByteStreamBE(params.getPacketMagic(), outStream);
                         byte[] block = ((BlockAndValidity)element).block.bitcoinSerialize();
                         byte[] length = new byte[4];
                         Utils.uint32ToByteArrayBE(block.length, length, 0);
@@ -1821,7 +1819,7 @@ public class FullBlockTestGenerator {
             input.setScriptSig(new ScriptBuilder().op(OP_1).build());
         } else {
             // Sign input
-            checkState(prevOut.scriptPubKey.isSentToRawPubKey());
+            checkState(ScriptPattern.isPayToPubKey(prevOut.scriptPubKey));
             Sha256Hash hash = t.hashForSignature(0, prevOut.scriptPubKey, SigHash.ALL, false);
             input.setScriptSig(ScriptBuilder.createInputScript(
                             new TransactionSignature(coinbaseOutKey.sign(hash), SigHash.ALL, false))

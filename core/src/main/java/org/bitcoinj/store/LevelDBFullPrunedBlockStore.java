@@ -30,6 +30,8 @@ import java.nio.ByteBuffer;
 
 import org.bitcoinj.core.Address;
 import org.bitcoinj.core.AddressFormatException;
+import org.bitcoinj.core.ECKey;
+import org.bitcoinj.core.LegacyAddress;
 import org.bitcoinj.core.NetworkParameters;
 import org.bitcoinj.core.Sha256Hash;
 import org.bitcoinj.core.StoredBlock;
@@ -38,6 +40,7 @@ import org.bitcoinj.core.Transaction;
 import org.bitcoinj.core.TransactionOutputChanges;
 import org.bitcoinj.core.UTXO;
 import org.bitcoinj.core.UTXOProviderException;
+import org.bitcoinj.core.Utils;
 import org.bitcoinj.core.VerificationException;
 import org.bitcoinj.script.Script;
 import org.bitcoinj.script.ScriptException;
@@ -419,16 +422,16 @@ public class LevelDBFullPrunedBlockStore implements FullPrunedBlockStore {
     }
 
     @Override
-    public List<UTXO> getOpenTransactionOutputs(List<Address> addresses) throws UTXOProviderException {
+    public List<UTXO> getOpenTransactionOutputs(List<ECKey> keys) throws UTXOProviderException {
         // Run this on a snapshot of database so internally consistent result
         // This is critical or if one address paid another could get incorrect
         // results
 
         List<UTXO> results = new LinkedList<>();
-        for (Address a : addresses) {
+        for (ECKey key : keys) {
             ByteBuffer bb = ByteBuffer.allocate(21);
             bb.put((byte) KeyType.ADDRESS_HASHINDEX.ordinal());
-            bb.put(a.getHash160());
+            bb.put(key.getPubKeyHash());
 
             ReadOptions ro = new ReadOptions();
             Snapshot sn = db.getSnapshot();
@@ -442,7 +445,7 @@ public class LevelDBFullPrunedBlockStore implements FullPrunedBlockStore {
                 bbKey.get(); // remove the address_hashindex byte.
                 byte[] addressKey = new byte[20];
                 bbKey.get(addressKey);
-                if (!Arrays.equals(addressKey, a.getHash160())) {
+                if (!Arrays.equals(addressKey, key.getPubKeyHash())) {
                     break;
                 }
                 byte[] hashBytes = new byte[32];
@@ -513,10 +516,7 @@ public class LevelDBFullPrunedBlockStore implements FullPrunedBlockStore {
                 txOutChanges = bos.toByteArray();
             } else {
                 int numTxn = undoableBlock.getTransactions().size();
-                bos.write((int) (0xFF & (numTxn >> 0)));
-                bos.write((int) (0xFF & (numTxn >> 8)));
-                bos.write((int) (0xFF & (numTxn >> 16)));
-                bos.write((int) (0xFF & (numTxn >> 24)));
+                Utils.uint32ToByteStreamLE(numTxn, bos);
                 for (Transaction tx : undoableBlock.getTransactions())
                     tx.bitcoinSerialize(bos);
                 transactions = bos.toByteArray();
@@ -671,9 +671,8 @@ public class LevelDBFullPrunedBlockStore implements FullPrunedBlockStore {
                 int txSize = bb.getInt();
                 byte[] transactions = new byte[txSize];
                 bb.get(transactions);
-                int offset = 0;
-                int numTxn = ((transactions[offset++] & 0xFF) << 0) | ((transactions[offset++] & 0xFF) << 8)
-                        | ((transactions[offset++] & 0xFF) << 16) | ((transactions[offset++] & 0xFF) << 24);
+                int numTxn = (int) Utils.readUint32(transactions, 0);
+                int offset = 4;
                 List<Transaction> transactionList = new LinkedList<>();
                 for (int i = 0; i < numTxn; i++) {
                     Transaction tx = new Transaction(params, transactions, offset);
@@ -796,7 +795,7 @@ public class LevelDBFullPrunedBlockStore implements FullPrunedBlockStore {
             return;
         } else {
             try {
-                a = Address.fromBase58(params, out.getAddress());
+                a = LegacyAddress.fromBase58(params, out.getAddress());
             } catch (AddressFormatException e) {
                 if (instrument)
                     endMethod("addUnspentTransactionOutput");
@@ -805,7 +804,7 @@ public class LevelDBFullPrunedBlockStore implements FullPrunedBlockStore {
         }
         ByteBuffer bb = ByteBuffer.allocate(57);
         bb.put((byte) KeyType.ADDRESS_HASHINDEX.ordinal());
-        bb.put(a.getHash160());
+        bb.put(a.getHash());
         bb.put(out.getHash().getBytes());
         bb.putInt((int) out.getIndex());
         byte[] value = new byte[0];
@@ -890,10 +889,10 @@ public class LevelDBFullPrunedBlockStore implements FullPrunedBlockStore {
             if (address == null || address.equals("")) {
                 Script sc = out.getScript();
                 a = sc.getToAddress(params);
-                hashBytes = a.getHash160();
+                hashBytes = a.getHash();
             } else {
-                a = Address.fromBase58(params, out.getAddress());
-                hashBytes = a.getHash160();
+                a = LegacyAddress.fromBase58(params, out.getAddress());
+                hashBytes = a.getHash();
             }
         } catch (AddressFormatException e) {
             if (instrument)

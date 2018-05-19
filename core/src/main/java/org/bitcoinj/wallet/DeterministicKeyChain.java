@@ -48,10 +48,10 @@ import static com.google.common.collect.Lists.newLinkedList;
 /**
  * <p>A deterministic key chain is a {@link KeyChain} that uses the
  * <a href="https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki">BIP 32 standard</a>, as implemented by
- * {@link org.bitcoinj.crypto.DeterministicHierarchy}, to derive all the keys in the keychain from a master seed.
+ * {@link DeterministicHierarchy}, to derive all the keys in the keychain from a master seed.
  * This type of wallet is extremely convenient and flexible. Although backing up full wallet files is always a good
  * idea, to recover money only the root seed needs to be preserved and that is a number small enough that it can be
- * written down on paper or, when represented using a BIP 39 {@link org.bitcoinj.crypto.MnemonicCode},
+ * written down on paper or, when represented using a BIP 39 {@link MnemonicCode},
  * dictated over the phone (possibly even memorized).</p>
  *
  * <p>Deterministic key chains have other advantages: parts of the key tree can be selectively revealed to allow
@@ -61,14 +61,14 @@ import static com.google.common.collect.Lists.newLinkedList;
  * A watching wallet is not instantiated using the public part of the master key as you may imagine. Instead, you
  * need to take the account key (first child of the master key) and provide the public part of that to the watching
  * wallet instead. You can do this by calling {@link #getWatchingKey()} and then serializing it with
- * {@link org.bitcoinj.crypto.DeterministicKey#serializePubB58(org.bitcoinj.core.NetworkParameters)}. The resulting "xpub..." string encodes
+ * {@link DeterministicKey#serializePubB58(NetworkParameters)}. The resulting "xpub..." string encodes
  * sufficient information about the account key to create a watching chain via
- * {@link org.bitcoinj.crypto.DeterministicKey#deserializeB58(org.bitcoinj.crypto.DeterministicKey, String, org.bitcoinj.core.NetworkParameters)}
+ * {@link DeterministicKey#deserializeB58(DeterministicKey, String, NetworkParameters)}
  * (with null as the first parameter) and then
- * {@link DeterministicKeyChain#DeterministicKeyChain(org.bitcoinj.crypto.DeterministicKey)}.</p>
+ * {@link DeterministicKeyChain#DeterministicKeyChain(DeterministicKey)}.</p>
  *
- * <p>This class builds on {@link org.bitcoinj.crypto.DeterministicHierarchy} and
- * {@link org.bitcoinj.crypto.DeterministicKey} by adding support for serialization to and from protobufs,
+ * <p>This class builds on {@link DeterministicHierarchy} and
+ * {@link DeterministicKey} by adding support for serialization to and from protobufs,
  * and encryption of parts of the key tree. Internally it arranges itself as per the BIP 32 spec, with the seed being
  * used to derive a master key, which is then used to derive an account key, the account key is used to derive two
  * child keys called the <i>internal</i> and <i>external</i> parent keys (for change and handing out addresses respectively)
@@ -105,7 +105,7 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
     private DeterministicHierarchy hierarchy;
     @Nullable private DeterministicKey rootKey;
     @Nullable private DeterministicSeed seed;
-    @Nullable private ImmutableList<ChildNumber> accountPath;
+    @Nullable private final ImmutableList<ChildNumber> accountPath;
 
     // Paths through the key tree. External keys are ones that are communicated to other parties. Internal keys are
     // keys created for change addresses, coinbases, mixing, etc - anything that isn't communicated. The distinction
@@ -197,7 +197,7 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
         }
 
         /**
-         * Generates a new key chain with entropy selected randomly from the given {@link java.security.SecureRandom}
+         * Generates a new key chain with entropy selected randomly from the given {@link SecureRandom}
          * object and of the requested size in bits.  The derived seed is further protected with a user selected passphrase
          * (see BIP 39).
          * @param random the random number generator - use new SecureRandom().
@@ -210,7 +210,7 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
         }
 
         /**
-         * Generates a new key chain with 128 bits of entropy selected randomly from the given {@link java.security.SecureRandom}
+         * Generates a new key chain with 128 bits of entropy selected randomly from the given {@link SecureRandom}
          * object.  The derived seed is further protected with a user selected passphrase
          * (see BIP 39).
          * @param random the random number generator - use new SecureRandom().
@@ -268,7 +268,7 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
     }
 
     /**
-     * Generates a new key chain with entropy selected randomly from the given {@link java.security.SecureRandom}
+     * Generates a new key chain with entropy selected randomly from the given {@link SecureRandom}
      * object and the default entropy size.
      */
     public DeterministicKeyChain(SecureRandom random) {
@@ -276,7 +276,7 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
     }
 
     /**
-     * Generates a new key chain with entropy selected randomly from the given {@link java.security.SecureRandom}
+     * Generates a new key chain with entropy selected randomly from the given {@link SecureRandom}
      * object and of the requested size in bits.
      */
     public DeterministicKeyChain(SecureRandom random, int bits) {
@@ -284,7 +284,7 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
     }
 
     /**
-     * Generates a new key chain with entropy selected randomly from the given {@link java.security.SecureRandom}
+     * Generates a new key chain with entropy selected randomly from the given {@link SecureRandom}
      * object and of the requested size in bits.  The derived seed is further protected with a user selected passphrase
      * (see BIP 39).
      */
@@ -322,17 +322,8 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
      * balances and generally follow along, but spending is not possible with such a chain.
      */
     public DeterministicKeyChain(DeterministicKey watchingKey) {
-        this(watchingKey, ACCOUNT_ZERO_PATH);
-    }
-
-    /**
-     * Creates a deterministic key chain that watches the given (public only) root key. You can use this to calculate
-     * balances and generally follow along, but spending is not possible with such a chain.
-     */
-    public DeterministicKeyChain(DeterministicKey watchingKey, ImmutableList<ChildNumber> accountPath) {
         checkArgument(watchingKey.isPubKeyOnly(), "Private subtrees not currently supported: if you got this key from DKC.getWatchingKey() then use .dropPrivate().dropParent() on it first.");
-        checkArgument(watchingKey.getPath().size() == accountPath.size(), "You can only watch an account key currently");
-        setAccountPath(accountPath);
+        this.accountPath = watchingKey.getPath();
         basicKeyChain = new BasicKeyChain();
         this.seed = null;
         this.rootKey = null;
@@ -342,22 +333,37 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
     }
 
     /**
-     * <p>Creates a deterministic key chain with the given watch key. If <code>isFollowing</code> flag is set then this keychain follows
+     * Creates a deterministic key chain from a watched or spendable account key.  If  {@code isWatching} flag is set,
+     * then creates a deterministic key chain that watches the given (public only) root key.  You can use this to calculate
+     * balances and generally follow along, but spending is not possible with such a chain.  If it is not set, then this
+     * creates a deterministic key chain that allows spending. If {@code isFollowing} flag is set(only allowed
+     * if {@code isWatching} is set) then this keychain follows some other keychain.  In a married wallet following
+     * keychain represents "spouse's" keychain.
+     */
+    public DeterministicKeyChain(DeterministicKey key, boolean isFollowing, boolean isWatching) {
+        if (isWatching)
+            checkArgument(key.isPubKeyOnly(), "Private subtrees not currently supported for watching keys: if you got this key from DKC.getWatchingKey() then use .dropPrivate().dropParent() on it first.");
+        else
+            checkArgument(key.hasPrivKey(), "Private subtrees are required.");
+        checkArgument(isWatching || !isFollowing, "Can only follow a key that is watched");
+
+        basicKeyChain = new BasicKeyChain();
+        this.seed = null;
+        this.rootKey = null;
+        basicKeyChain.importKey(key);
+        hierarchy = new DeterministicHierarchy(key);
+        this.accountPath = key.getPath();
+        initializeHierarchyUnencrypted(key);
+        this.isFollowing = isFollowing;
+    }
+
+    /**
+     * <p>Creates a deterministic key chain with the given watch key. If {@code isFollowing} flag is set then this keychain follows
      * some other keychain. In a married wallet following keychain represents "spouse's" keychain.</p>
      * <p>Watch key has to be an account key.</p>
      */
     protected DeterministicKeyChain(DeterministicKey watchKey, boolean isFollowing) {
-        this(watchKey, isFollowing, ACCOUNT_ZERO_PATH);
-    }
-
-    /**
-     * <p>Creates a deterministic key chain with the given watch key. If <code>isFollowing</code> flag is set then this keychain follows
-     * some other keychain. In a married wallet following keychain represents "spouse's" keychain.</p>
-     * <p>Watch key has to be an account key.</p>
-     */
-    protected DeterministicKeyChain(DeterministicKey watchKey, boolean isFollowing,
-            ImmutableList<ChildNumber> accountPath) {
-        this(watchKey, accountPath);
+        this(watchKey);
         this.isFollowing = isFollowing;
     }
 
@@ -374,14 +380,14 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
      * Creates a key chain that watches the given account key.
      */
     public static DeterministicKeyChain watch(DeterministicKey accountKey) {
-        return watch(accountKey, ACCOUNT_ZERO_PATH);
+        return new DeterministicKeyChain(accountKey);
     }
 
     /**
-     * Creates a key chain that watches the given account key.
+     * Creates a key chain that can spend from the given account key.
      */
-    public static DeterministicKeyChain watch(DeterministicKey accountKey, ImmutableList<ChildNumber> accountPath) {
-        return new DeterministicKeyChain(accountKey, accountPath);
+    public static DeterministicKeyChain spend(DeterministicKey accountKey) {
+        return new DeterministicKeyChain(accountKey, false, false);
     }
 
     /**
@@ -393,11 +399,11 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
 
     /**
      * Creates a deterministic key chain with an encrypted deterministic seed using the provided account path.
-     *  Using {@link org.bitcoinj.crypto.KeyCrypter KeyCrypter} to decrypt.
+     *  Using {@link KeyCrypter KeyCrypter} to decrypt.
      */
     protected DeterministicKeyChain(DeterministicSeed seed, @Nullable KeyCrypter crypter,
                                     ImmutableList<ChildNumber> accountPath) {
-        setAccountPath(accountPath);
+        this.accountPath = accountPath;
         this.seed = seed;
         basicKeyChain = new BasicKeyChain(crypter);
         if (!seed.isEncrypted()) {
@@ -419,7 +425,7 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
      * For use in encryption when {@link #toEncrypted(KeyCrypter, KeyParameter)} is called, so that
      * subclasses can override that method and create an instance of the right class.
      *
-     * See also {@link #makeKeyChainFromSeed(DeterministicSeed)}
+     * See also {@link #makeKeyChainFromSeed(DeterministicSeed, ImmutableList)}
      */
     protected DeterministicKeyChain(KeyCrypter crypter, KeyParameter aesKey, DeterministicKeyChain chain) {
         // Can't encrypt a watching chain.
@@ -427,6 +433,7 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
         checkNotNull(chain.seed);
 
         checkArgument(!chain.rootKey.isEncrypted(), "Chain already encrypted");
+        this.accountPath = chain.getAccountPath();
 
         this.issuedExternalKeys = chain.issuedExternalKeys;
         this.issuedInternalKeys = chain.issuedInternalKeys;
@@ -466,11 +473,6 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
         if (accountPath != null)
             return accountPath;
         return ACCOUNT_ZERO_PATH;
-    }
-
-    /** Store account path of this DeterministicKey */
-    protected void setAccountPath(ImmutableList<ChildNumber> accountPath) {
-        this.accountPath = accountPath;
     }
 
     private DeterministicKey encryptNonLeaf(KeyParameter aesKey, DeterministicKeyChain chain,
@@ -664,10 +666,10 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
     }
 
     /**
-     * <p>An alias for <code>getKeyByPath(getAccountPath())</code>.</p>
+     * <p>An alias for {@code getKeyByPath(getAccountPath())}.</p>
      *
      * <p>Use this when you would like to create a watching key chain that follows this one, but can't spend money from it.
-     * The returned key can be serialized and then passed into {@link #watch(org.bitcoinj.crypto.DeterministicKey)}
+     * The returned key can be serialized and then passed into {@link #watch(DeterministicKey)}
      * on another system to watch the hierarchy.</p>
      *
      * <p>Note that the returned key is not pubkey only unless this key chain already is: the returned key can still
@@ -891,6 +893,7 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
                 // Possibly create the chain, if we didn't already do so yet.
                 boolean isWatchingAccountKey = false;
                 boolean isFollowingKey = false;
+                boolean isSpendingKey = false;
                 // save previous chain if any if the key is marked as following. Current key and the next ones are to be
                 // placed in new following key chain
                 if (key.getDeterministicKey().getIsFollowing()) {
@@ -908,7 +911,13 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
                 if (chain == null) {
                     // If this is not a following chain and previous was, this must be married
                     boolean isMarried = !isFollowingKey && !chains.isEmpty() && chains.get(chains.size() - 1).isFollowing();
-                    if (seed == null) {
+                    // If this has a private key but no seed, then all we know is the spending key H
+                    if (seed == null && key.hasSecretBytes()) {
+                        DeterministicKey accountKey = new DeterministicKey(immutablePath, chainCode, pubkey, new BigInteger(1, key.getSecretBytes().toByteArray()), null);
+                        accountKey.setCreationTimeSeconds(key.getCreationTimestamp() / 1000);
+                        chain = factory.makeSpendingKeyChain(key, iter.peek(), accountKey, isMarried);
+                        isSpendingKey = true;
+                    } else if (seed == null) {
                         DeterministicKey accountKey = new DeterministicKey(immutablePath, chainCode, pubkey, null, null);
                         accountKey.setCreationTimeSeconds(key.getCreationTimestamp() / 1000);
                         chain = factory.makeWatchingKeyChain(key, iter.peek(), accountKey, isFollowingKey, isMarried);
@@ -924,7 +933,7 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
                 }
                 // Find the parent key assuming this is not the root key, and not an account key for a watching chain.
                 DeterministicKey parent = null;
-                if (!path.isEmpty() && !isWatchingAccountKey) {
+                if (!path.isEmpty() && !isWatchingAccountKey && !isSpendingKey) {
                     ChildNumber index = path.removeLast();
                     parent = chain.hierarchy.get(path, false, false);
                     path.add(index);
@@ -962,7 +971,7 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
                             chain.rootKey = detkey;
                             chain.hierarchy = new DeterministicHierarchy(detkey);
                         }
-                    } else if (path.size() == chain.getAccountPath().size() + 1) {
+                    } else if ((path.size() == chain.getAccountPath().size() + 1) || isSpendingKey) {
                         // Constant 0 is used for external chain and constant 1 for internal chain
                         // (also known as change addresses). https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
                         if (detkey.getChildNumber().num() == 0) {
@@ -1033,7 +1042,7 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
         checkState(seed.isEncrypted());
         String passphrase = DEFAULT_PASSPHRASE_FOR_MNEMONIC; // FIXME allow non-empty passphrase
         DeterministicSeed decSeed = seed.decrypt(getKeyCrypter(), passphrase, aesKey);
-        DeterministicKeyChain chain = makeKeyChainFromSeed(decSeed);
+        DeterministicKeyChain chain = makeKeyChainFromSeed(decSeed, getAccountPath());
         // Now double check that the keys match to catch the case where the key is wrong but padding didn't catch it.
         if (!chain.getWatchingKey().getPubKeyPoint().equals(getWatchingKey().getPubKeyPoint()))
             throw new KeyCrypterException("Provided AES key is wrong");
@@ -1060,8 +1069,8 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
      * Subclasses should override this to create an instance of the subclass instead of a plain DKC.
      * This is used in encryption/decryption.
      */
-    protected DeterministicKeyChain makeKeyChainFromSeed(DeterministicSeed seed) {
-        return new DeterministicKeyChain(seed);
+    protected DeterministicKeyChain makeKeyChainFromSeed(DeterministicSeed seed, ImmutableList<ChildNumber> accountPath) {
+        return new DeterministicKeyChain(seed, accountPath);
     }
 
     @Override

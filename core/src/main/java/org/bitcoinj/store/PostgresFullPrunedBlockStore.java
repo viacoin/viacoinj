@@ -34,7 +34,7 @@ import java.util.List;
 
 /**
  * <p>A full pruned block store using the Postgres database engine. As an added bonus an address index is calculated,
- * so you can use {@link #calculateBalanceForAddress(org.bitcoinj.core.Address)} to quickly look up
+ * so you can use {@link #calculateBalanceForAddress(Address)} to quickly look up
  * the quantity of bitcoins controlled by that address.</p>
  */
 public class PostgresFullPrunedBlockStore extends DatabaseFullPrunedBlockStore {
@@ -181,10 +181,7 @@ public class PostgresFullPrunedBlockStore extends DatabaseFullPrunedBlockStore {
                 txOutChanges = bos.toByteArray();
             } else {
                 int numTxn = undoableBlock.getTransactions().size();
-                bos.write(0xFF & numTxn);
-                bos.write(0xFF & (numTxn >> 8));
-                bos.write(0xFF & (numTxn >> 16));
-                bos.write(0xFF & (numTxn >> 24));
+                Utils.uint32ToByteStreamLE(numTxn, bos);
                 for (Transaction tx : undoableBlock.getTransactions())
                     tx.bitcoinSerialize(bos);
                 transactions = bos.toByteArray();

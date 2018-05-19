@@ -229,7 +229,7 @@ class TransactionalMultiKeyHashMap<UniqueKeyType, MultiKeyType, ValueType> {
 }
 
 /**
- * Keeps {@link StoredBlock}s, {@link StoredUndoableBlock}s and {@link org.bitcoinj.core.UTXO}s in memory.
+ * Keeps {@link StoredBlock}s, {@link StoredUndoableBlock}s and {@link UTXO}s in memory.
  * Used primarily for unit testing.
  */
 public class MemoryFullPrunedBlockStore implements FullPrunedBlockStore {
@@ -412,13 +412,15 @@ public class MemoryFullPrunedBlockStore implements FullPrunedBlockStore {
     }
 
     @Override
-    public List<UTXO> getOpenTransactionOutputs(List<Address> addresses) throws UTXOProviderException {
+    public List<UTXO> getOpenTransactionOutputs(List<ECKey> keys) throws UTXOProviderException {
         // This is *NOT* optimal: We go through all the outputs and select the ones we are looking for.
         // If someone uses this store for production then they have a lot more to worry about than an inefficient impl :)
         List<UTXO> foundOutputs = new ArrayList<>();
         List<UTXO> outputsList = transactionOutputMap.values();
         for (UTXO output : outputsList) {
-            for (Address address : addresses) {
+            for (ECKey key : keys) {
+                // TODO switch to pubKeyHash in order to support native segwit addresses
+                Address address = LegacyAddress.fromKey(params, key);
                 if (output.getAddress().equals(address.toString())) {
                     foundOutputs.add(output);
                 }

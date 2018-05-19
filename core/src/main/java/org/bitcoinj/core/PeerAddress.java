@@ -17,9 +17,7 @@
 
 package org.bitcoinj.core;
 
-import org.bitcoinj.params.MainNetParams;
 import com.google.common.base.Objects;
-import com.google.common.net.InetAddresses;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -28,8 +26,6 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 
-import static org.bitcoinj.core.Utils.uint32ToByteStreamLE;
-import static org.bitcoinj.core.Utils.uint64ToByteStreamLE;
 import static com.google.common.base.Preconditions.checkNotNull;
 
 /**
@@ -77,7 +73,7 @@ public class PeerAddress extends ChildMessage {
         this.port = port;
         this.protocolVersion = protocolVersion;
         this.services = services;
-        length = protocolVersion > 31402 ? MESSAGE_SIZE : MESSAGE_SIZE - 4;
+        length = isSerializeTime() ? MESSAGE_SIZE : MESSAGE_SIZE - 4;
     }
 
     /**
@@ -116,19 +112,19 @@ public class PeerAddress extends ChildMessage {
     }
 
     public static PeerAddress localhost(NetworkParameters params) {
-        return new PeerAddress(params, InetAddresses.forString("127.0.0.1"), params.getPort());
+        return new PeerAddress(params, InetAddress.getLoopbackAddress(), params.getPort());
     }
 
     @Override
     protected void bitcoinSerializeToStream(OutputStream stream) throws IOException {
-        if (protocolVersion >= 31402) {
+        if (isSerializeTime()) {
             //TODO this appears to be dynamic because the client only ever sends out it's own address
             //so assumes itself to be up.  For a fuller implementation this needs to be dynamic only if
             //the address refers to this client.
             int secs = (int) (Utils.currentTimeSeconds());
-            uint32ToByteStreamLE(secs, stream);
+            Utils.uint32ToByteStreamLE(secs, stream);
         }
-        uint64ToByteStreamLE(services, stream);  // nServices.
+        Utils.uint64ToByteStreamLE(services, stream);  // nServices.
         // Java does not provide any utility to map an IPv4 address into IPv6 space, so we have to do it by hand.
         byte[] ipBytes = addr.getAddress();
         if (ipBytes.length == 4) {
@@ -140,8 +136,11 @@ public class PeerAddress extends ChildMessage {
         }
         stream.write(ipBytes);
         // And write out the port. Unlike the rest of the protocol, address and port is in big endian byte order.
-        stream.write((byte) (0xFF & port >> 8));
-        stream.write((byte) (0xFF & port));
+        Utils.uint16ToByteStreamBE(port, stream);
+    }
+
+    private boolean isSerializeTime() {
+        return protocolVersion >= 31402 && !(parent instanceof VersionMessage);
     }
 
     @Override
@@ -151,7 +150,7 @@ public class PeerAddress extends ChildMessage {
         //   uint64 services   (flags determining what the node can do)
         //   16 bytes ip address
         //   2 bytes port num
-        if (protocolVersion > 31402)
+        if (isSerializeTime())
             time = readUint32();
         else
             time = -1;
@@ -162,9 +161,10 @@ public class PeerAddress extends ChildMessage {
         } catch (UnknownHostException e) {
             throw new RuntimeException(e);  // Cannot happen.
         }
-        port = ((0xFF & payload[cursor++]) << 8) | (0xFF & payload[cursor++]);
+        port = Utils.readUint16BE(payload, cursor);
+        cursor += 2;
         // The 4 byte difference is the uint32 timestamp that was introduced in version 31402 
-        length = protocolVersion > 31402 ? MESSAGE_SIZE : MESSAGE_SIZE - 4;
+        length = isSerializeTime() ? MESSAGE_SIZE : MESSAGE_SIZE - 4;
     }
 
     public String getHostname() {

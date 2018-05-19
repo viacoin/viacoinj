@@ -17,14 +17,22 @@
 
 package org.bitcoinj.wallet;
 
-import org.bitcoinj.core.*;
+import com.google.protobuf.Message;
+import org.bitcoinj.core.Coin;
+import org.bitcoinj.core.NetworkParameters;
+import org.bitcoinj.core.PeerAddress;
+import org.bitcoinj.core.Sha256Hash;
+import org.bitcoinj.core.Transaction;
+import org.bitcoinj.core.TransactionConfidence;
 import org.bitcoinj.core.TransactionConfidence.ConfidenceType;
+import org.bitcoinj.core.TransactionInput;
+import org.bitcoinj.core.TransactionOutPoint;
+import org.bitcoinj.core.TransactionOutput;
+import org.bitcoinj.core.TransactionWitness;
 import org.bitcoinj.crypto.KeyCrypter;
 import org.bitcoinj.crypto.KeyCrypterScrypt;
 import org.bitcoinj.script.Script;
 import org.bitcoinj.script.ScriptException;
-import org.bitcoinj.signers.LocalTransactionSigner;
-import org.bitcoinj.signers.TransactionSigner;
 import org.bitcoinj.utils.ExchangeRate;
 import org.bitcoinj.utils.Fiat;
 import org.bitcoinj.wallet.Protos.Wallet.EncryptionType;
@@ -40,6 +48,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -59,8 +70,8 @@ import static com.google.common.base.Preconditions.checkNotNull;
  * format is defined by the <tt>wallet.proto</tt> file in the bitcoinj source distribution.<p>
  *
  * This class is used through its static methods. The most common operations are writeWallet and readWallet, which do
- * the obvious operations on Output/InputStreams. You can use a {@link java.io.ByteArrayInputStream} and equivalent
- * {@link java.io.ByteArrayOutputStream} if you'd like byte arrays instead. The protocol buffer can also be manipulated
+ * the obvious operations on Output/InputStreams. You can use a {@link ByteArrayInputStream} and equivalent
+ * {@link ByteArrayOutputStream} if you'd like byte arrays instead. The protocol buffer can also be manipulated
  * in its object form if you'd like to modify the flattened data structure before serialization to binary.<p>
  *
  * You can extend the wallet format with additional fields specific to your application if you want, but make sure
@@ -147,7 +158,7 @@ public class WalletProtobufSerializer {
 
     /**
      * Returns the given wallet formatted as text. The text format is that used by protocol buffers and although it
-     * can also be parsed using {@link TextFormat#merge(CharSequence, com.google.protobuf.Message.Builder)},
+     * can also be parsed using {@link TextFormat#merge(CharSequence, Message.Builder)},
      * it is designed more for debugging than storage. It is not well specified and wallets are largely binary data
      * structures anyway, consisting as they do of keys (large random numbers) and {@link Transaction}s which also
      * mostly contain keys and hashes.
@@ -223,16 +234,6 @@ public class WalletProtobufSerializer {
             walletBuilder.addTags(tag);
         }
 
-        for (TransactionSigner signer : wallet.getTransactionSigners()) {
-            // do not serialize LocalTransactionSigner as it's being added implicitly
-            if (signer instanceof LocalTransactionSigner)
-                continue;
-            Protos.TransactionSigner.Builder protoSigner = Protos.TransactionSigner.newBuilder();
-            protoSigner.setClassName(signer.getClass().getName());
-            protoSigner.setData(ByteString.copyFrom(signer.serialize()));
-            walletBuilder.addTransactionSigners(protoSigner);
-        }
-
         // Populate the wallet version.
         walletBuilder.setVersion(wallet.getVersion());
 
@@ -275,6 +276,14 @@ public class WalletProtobufSerializer {
                 inputBuilder.setSequence((int) input.getSequenceNumber());
             if (input.getValue() != null)
                 inputBuilder.setValue(input.getValue().value);
+            if (input.hasWitness()) {
+                TransactionWitness witness = input.getWitness();
+                Protos.ScriptWitness.Builder witnessBuilder = Protos.ScriptWitness.newBuilder();
+                int pushCount = witness.getPushCount();
+                for (int i = 0; i < pushCount; i++)
+                    witnessBuilder.addData(ByteString.copyFrom(witness.getPush(i)));
+                inputBuilder.setWitness(witnessBuilder);
+            }
             txBuilder.addTransactionInput(inputBuilder);
         }
 
@@ -555,18 +564,6 @@ public class WalletProtobufSerializer {
             wallet.setTag(tag.getTag(), tag.getData());
         }
 
-        for (Protos.TransactionSigner signerProto : walletProto.getTransactionSignersList()) {
-            try {
-                Class signerClass = Class.forName(signerProto.getClassName());
-                TransactionSigner signer = (TransactionSigner)signerClass.newInstance();
-                signer.deserialize(signerProto.getData().toByteArray());
-                wallet.addTransactionSigner(signer);
-            } catch (Exception e) {
-                throw new UnreadableWalletException("Unable to deserialize TransactionSigner instance: " +
-                        signerProto.getClassName(), e);
-            }
-        }
-
         if (walletProto.hasVersion()) {
             wallet.setVersion(walletProto.getVersion());
         }
@@ -617,7 +614,7 @@ public class WalletProtobufSerializer {
 
     /**
      * Returns the loaded protocol buffer from the given byte stream. You normally want
-     * {@link Wallet#loadFromFile(java.io.File, WalletExtension...)} instead - this method is designed for low level
+     * {@link Wallet#loadFromFile(File, WalletExtension...)} instead - this method is designed for low level
      * work involving the wallet file format itself.
      */
     public static Protos.Wallet parseToProto(InputStream input) throws IOException {
@@ -652,6 +649,15 @@ public class WalletProtobufSerializer {
             TransactionInput input = new TransactionInput(params, tx, scriptBytes, outpoint, value);
             if (inputProto.hasSequence())
                 input.setSequenceNumber(0xffffffffL & inputProto.getSequence());
+            if (inputProto.hasWitness()) {
+                Protos.ScriptWitness witnessProto = inputProto.getWitness();
+                if (witnessProto.getDataCount() > 0) {
+                    TransactionWitness witness = new TransactionWitness(witnessProto.getDataCount());
+                    for (int j = 0; j < witnessProto.getDataCount(); j++)
+                        witness.setPush(j, witnessProto.getData(j).toByteArray());
+                    input.setWitness(witness);
+                }
+            }
             tx.addInput(input);
         }
 

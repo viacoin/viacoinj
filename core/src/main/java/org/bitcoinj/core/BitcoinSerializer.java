@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -364,7 +365,7 @@ public class BitcoinSerializer extends MessageSerializer {
             for (; header[cursor] != 0 && cursor < COMMAND_LEN; cursor++) ;
             byte[] commandBytes = new byte[cursor];
             System.arraycopy(header, 0, commandBytes, 0, cursor);
-            command = Utils.toString(commandBytes, "US-ASCII");
+            command = new String(commandBytes, StandardCharsets.US_ASCII);
             cursor = COMMAND_LEN;
 
             size = (int) readUint32(header, cursor);

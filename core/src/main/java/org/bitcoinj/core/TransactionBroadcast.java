@@ -116,8 +116,15 @@ public class TransactionBroadcast {
     }
 
     private class EnoughAvailablePeers implements Runnable {
+        private Context context;
+
+        public EnoughAvailablePeers() {
+            this.context = Context.get();
+        }
+
         @Override
         public void run() {
+            Context.propagate(context);
             // We now have enough connected peers to send the transaction.
             // This can be called immediately if we already have enough. Otherwise it'll be called from a peer
             // thread.
@@ -256,7 +263,7 @@ public class TransactionBroadcast {
 
     /**
      * Sets the given callback for receiving progress values, which will run on the user thread. See
-     * {@link org.bitcoinj.utils.Threading} for details.  If the broadcast has already started then the callback will
+     * {@link Threading} for details.  If the broadcast has already started then the callback will
      * be invoked immediately with the current progress.
      */
     public void setProgressCallback(ProgressCallback callback) {

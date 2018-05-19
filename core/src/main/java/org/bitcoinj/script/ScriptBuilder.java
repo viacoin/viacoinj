@@ -18,10 +18,15 @@
 package org.bitcoinj.script;
 
 import com.google.common.collect.Lists;
+
 import org.bitcoinj.core.Address;
+import org.bitcoinj.core.LegacyAddress;
 import org.bitcoinj.core.ECKey;
+import org.bitcoinj.core.SegwitAddress;
+import org.bitcoinj.core.Transaction;
 import org.bitcoinj.core.Utils;
 import org.bitcoinj.crypto.TransactionSignature;
+import org.bitcoinj.script.Script.ScriptType;
 
 import javax.annotation.Nullable;
 import java.math.BigInteger;
@@ -37,7 +42,7 @@ import static org.bitcoinj.script.ScriptOpCodes.*;
 
 /**
  * <p>Tools for the construction of commonly used script types. You don't normally need this as it's hidden behind
- * convenience methods on {@link org.bitcoinj.core.Transaction}, but they are useful when working with the
+ * convenience methods on {@link Transaction}, but they are useful when working with the
  * protocol at a lower level.</p>
  */
 public class ScriptBuilder {
@@ -141,7 +146,7 @@ public class ScriptBuilder {
     }
 
     /** Adds the given number as a push data chunk.
-     * This is intended to use for negative numbers or values > 16, and although
+     * This is intended to use for negative numbers or values greater than 16, and although
      * it will accept numbers in the range 0-16 inclusive, the encoding would be
      * considered non-standard.
      * 
@@ -165,7 +170,7 @@ public class ScriptBuilder {
 
     /**
      * Adds the given number as a push data chunk to the given index in the program.
-     * This is intended to use for negative numbers or values > 16, and although
+     * This is intended to use for negative numbers or values greater than 16, and although
      * it will accept numbers in the range 0-16 inclusive, the encoding would be
      * considered non-standard.
      * 
@@ -249,23 +254,33 @@ public class ScriptBuilder {
 
     /** Creates a scriptPubKey that encodes payment to the given address. */
     public static Script createOutputScript(Address to) {
-        if (to.isP2SHAddress()) {
-            // OP_HASH160 <scriptHash> OP_EQUAL
-            return new ScriptBuilder()
-                .op(OP_HASH160)
-                .data(to.getHash160())
-                .op(OP_EQUAL)
-                .build();
+        ScriptBuilder builder = new ScriptBuilder();
+        if (to instanceof LegacyAddress) {
+            ScriptType scriptType = to.getOutputScriptType();
+            if (scriptType == ScriptType.P2PKH) {
+                // OP_DUP OP_HASH160 <pubKeyHash> OP_EQUALVERIFY OP_CHECKSIG
+                builder.op(OP_DUP);
+                builder.op(OP_HASH160);
+                builder.data(to.getHash());
+                builder.op(OP_EQUALVERIFY);
+                builder.op(OP_CHECKSIG);
+            } else if (scriptType == ScriptType.P2SH) {
+                // OP_HASH160 <scriptHash> OP_EQUAL
+                builder.op(OP_HASH160);
+                builder.data(to.getHash());
+                builder.op(OP_EQUAL);
+            } else {
+                throw new IllegalStateException("Cannot handle " + scriptType);
+            }
+        } else if (to instanceof SegwitAddress) {
+            // OP_0 <pubKeyHash|scriptHash>
+            SegwitAddress toSegwit = (SegwitAddress) to;
+            builder.smallNum(toSegwit.getWitnessVersion());
+            builder.data(toSegwit.getWitnessProgram());
         } else {
-            // OP_DUP OP_HASH160 <pubKeyHash> OP_EQUALVERIFY OP_CHECKSIG
-            return new ScriptBuilder()
-                .op(OP_DUP)
-                .op(OP_HASH160)
-                .data(to.getHash160())
-                .op(OP_EQUALVERIFY)
-                .op(OP_CHECKSIG)
-                .build();
+            throw new IllegalStateException("Cannot handle " + to);
         }
+        return builder.build();
     }
 
     /** Creates a scriptPubKey that encodes payment to the given raw public key. */
@@ -274,7 +289,7 @@ public class ScriptBuilder {
     }
 
     /**
-     * Creates a scriptSig that can redeem a pay-to-address output.
+     * Creates a scriptSig that can redeem a P2PKH output.
      * If given signature is null, incomplete scriptSig will be created with OP_0 instead of signature
      */
     public static Script createInputScript(@Nullable TransactionSignature signature, ECKey pubKey) {
@@ -284,7 +299,7 @@ public class ScriptBuilder {
     }
 
     /**
-     * Creates a scriptSig that can redeem a pay-to-pubkey output.
+     * Creates a scriptSig that can redeem a P2PK output.
      * If given signature is null, incomplete scriptSig will be created with OP_0 instead of signature
      */
     public static Script createInputScript(@Nullable TransactionSignature signature) {
@@ -328,7 +343,7 @@ public class ScriptBuilder {
     }
 
     /**
-     * Create a program that satisfies a pay-to-script hashed OP_CHECKMULTISIG program.
+     * Create a program that satisfies a P2SH OP_CHECKMULTISIG program.
      * If given signature list is null, incomplete scriptSig will be created with OP_0 instead of signatures
      */
     public static Script createP2SHMultiSigInputScript(@Nullable List<TransactionSignature> signatures,

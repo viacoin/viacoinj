@@ -20,7 +20,6 @@ package org.bitcoinj.core;
 import com.google.common.annotations.*;
 import com.google.common.base.*;
 import com.google.common.collect.*;
-import com.google.common.net.*;
 import com.google.common.primitives.*;
 import com.google.common.util.concurrent.*;
 import net.jcip.annotations.*;
@@ -42,8 +41,6 @@ import java.net.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.*;
-
-import okhttp3.OkHttpClient;
 
 import static com.google.common.base.Preconditions.*;
 
@@ -180,11 +177,11 @@ public class PeerGroup implements TransactionBroadcaster {
         @Override
         public void onCoinsReceived(Wallet wallet, Transaction tx, Coin prevBalance, Coin newBalance) {
             // We received a relevant transaction. We MAY need to recalculate and resend the Bloom filter, but only
-            // if we have received a transaction that includes a relevant pay-to-pubkey output.
+            // if we have received a transaction that includes a relevant P2PK output.
             //
-            // The reason is that pay-to-pubkey outputs, when spent, will not repeat any data we can predict in their
+            // The reason is that P2PK outputs, when spent, will not repeat any data we can predict in their
             // inputs. So a remote peer will update the Bloom filter for us when such an output is seen matching the
-            // existing filter, so that it includes the tx hash in which the pay-to-pubkey output was observed. Thus
+            // existing filter, so that it includes the tx hash in which the P2PK output was observed. Thus
             // the spending transaction will always match (due to the outpoint structure).
             //
             // Unfortunately, whilst this is required for correct sync of the chain in blocks, there are two edge cases.
@@ -202,7 +199,7 @@ public class PeerGroup implements TransactionBroadcaster {
             // filter. In case (1), we need to retransmit the filter to the connected peers. In case (2), we don't
             // and shouldn't, we should just recalculate and cache the new filter for next time.
             for (TransactionOutput output : tx.getOutputs()) {
-                if (output.getScriptPubKey().isSentToRawPubKey() && output.isMine(wallet)) {
+                if (ScriptPattern.isPayToPubKey(output.getScriptPubKey()) && output.isMine(wallet)) {
                     if (tx.getConfidence().getConfidenceType() == TransactionConfidence.ConfidenceType.BUILDING)
                         recalculateFastCatchupAndFilter(FilterRecalculateMode.SEND_IF_CHANGED);
                     else
@@ -1022,7 +1019,7 @@ public class PeerGroup implements TransactionBroadcaster {
             Socket socket = null;
             try {
                 socket = new Socket();
-                socket.connect(new InetSocketAddress(InetAddresses.forString("127.0.0.1"), params.getPort()), vConnectTimeoutMillis);
+                socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), params.getPort()), vConnectTimeoutMillis);
                 localhostCheckState = LocalhostCheckState.FOUND;
                 return true;
             } catch (IOException e) {
@@ -1077,12 +1074,6 @@ public class PeerGroup implements TransactionBroadcaster {
         Futures.getUnchecked(startAsync());
     }
 
-    /** Can just use start() for a blocking start here instead of startAsync/awaitRunning: PeerGroup is no longer a Guava service. */
-    @Deprecated
-    public void awaitRunning() {
-        waitForJobQueue();
-    }
-
     public ListenableFuture stopAsync() {
         checkState(vRunning);
         vRunning = false;
@@ -1091,6 +1082,7 @@ public class PeerGroup implements TransactionBroadcaster {
             public void run() {
                 try {
                     log.info("Stopping ...");
+                    Stopwatch watch = Stopwatch.createStarted();
                     // Blocking close of all sockets.
                     channels.stopAsync();
                     channels.awaitTerminated();
@@ -1098,7 +1090,7 @@ public class PeerGroup implements TransactionBroadcaster {
                         peerDiscovery.shutdown();
                     }
                     vRunning = false;
-                    log.info("Stopped.");
+                    log.info("Stopped, took {}.", watch);
                 } catch (Throwable e) {
                     log.error("Exception when shutting down", e);  // The executor swallows exceptions :(
                 }
@@ -1111,19 +1103,11 @@ public class PeerGroup implements TransactionBroadcaster {
     /** Does a blocking stop */
     public void stop() {
         try {
+            Stopwatch watch = Stopwatch.createStarted();
             stopAsync();
             log.info("Awaiting PeerGroup shutdown ...");
             executor.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    /** Can just use stop() here instead of stopAsync/awaitTerminated: PeerGroup is no longer a Guava service. */
-    @Deprecated
-    public void awaitTerminated() {
-        try {
-            executor.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
+            log.info("... took {}", watch);
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
@@ -1172,10 +1156,10 @@ public class PeerGroup implements TransactionBroadcaster {
      * than the current chain head, the relevant parts of the chain won't be redownloaded for you.</p>
      *
      * <p>This method invokes {@link PeerGroup#recalculateFastCatchupAndFilter(FilterRecalculateMode)}.
-     * The return value of this method is the <code>ListenableFuture</code> returned by that invocation.</p>
+     * The return value of this method is the {@code ListenableFuture} returned by that invocation.</p>
      *
-     * @return a future that completes once each <code>Peer</code> in this group has had its
-     *         <code>BloomFilter</code> (re)set.
+     * @return a future that completes once each {@code Peer} in this group has had its
+     *         {@code BloomFilter} (re)set.
      */
     public ListenableFuture<BloomFilter> addPeerFilterProvider(PeerFilterProvider provider) {
         lock.lock();
@@ -1336,7 +1320,7 @@ public class PeerGroup implements TransactionBroadcaster {
 
     /**
      * Returns the number of currently connected peers. To be informed when this count changes, register a 
-     * {@link org.bitcoinj.core.listeners.PeerConnectionEventListener} and use the onPeerConnected/onPeerDisconnected methods.
+     * {@link PeerConnectionEventListener} and use the onPeerConnected/onPeerDisconnected methods.
      */
     public int numConnectedPeers() {
         return peers.size();
@@ -1348,7 +1332,7 @@ public class PeerGroup implements TransactionBroadcaster {
      * 
      * @param address destination IP and port.
      * @return The newly created Peer object or null if the peer could not be connected.
-     *         Use {@link org.bitcoinj.core.Peer#getConnectionOpenFuture()} if you
+     *         Use {@link Peer#getConnectionOpenFuture()} if you
      *         want a future which completes when the connection is open.
      */
     @Nullable
@@ -1392,6 +1376,8 @@ public class PeerGroup implements TransactionBroadcaster {
         VersionMessage ver = getVersionMessage().duplicate();
         ver.bestHeight = chain == null ? 0 : chain.getBestChainHeight();
         ver.time = Utils.currentTimeSeconds();
+        ver.receivingAddr = address;
+        ver.receivingAddr.setParent(ver);
 
         Peer peer = createPeer(address, ver);
         peer.addConnectedEventListener(Threading.SAME_THREAD, startupListener);
@@ -1633,9 +1619,9 @@ public class PeerGroup implements TransactionBroadcaster {
     }
 
     /**
-     * Tells the PeerGroup to download only block headers before a certain time and bodies after that. Call this
+     * Tells the {@link PeerGroup} to download only block headers before a certain time and bodies after that. Call this
      * before starting block chain download.
-     * Do not use a time > NOW - 1 block, as it will break some block download logic.
+     * Do not use a {@code time > NOW - 1} block, as it will break some block download logic.
      */
     public void setFastCatchupTimeSecs(long secondsSinceEpoch) {
         lock.lock();
@@ -1905,12 +1891,12 @@ public class PeerGroup implements TransactionBroadcaster {
 
     /**
      * Returns a future that is triggered when the number of connected peers is equal to the given number of
-     * peers. By using this with {@link org.bitcoinj.core.PeerGroup#getMaxConnections()} you can wait until the
+     * peers. By using this with {@link PeerGroup#getMaxConnections()} you can wait until the
      * network is fully online. To block immediately, just call get() on the result. Just calls
      * {@link #waitForPeersOfVersion(int, long)} with zero as the protocol version.
      *
      * @param numPeers How many peers to wait for.
-     * @return a future that will be triggered when the number of connected peers >= numPeers
+     * @return a future that will be triggered when the number of connected peers is greater than or equals numPeers
      */
     public ListenableFuture<List<Peer>> waitForPeers(final int numPeers) {
         return waitForPeersOfVersion(numPeers, 0);
@@ -1922,7 +1908,7 @@ public class PeerGroup implements TransactionBroadcaster {
      *
      * @param numPeers How many peers to wait for.
      * @param protocolVersion The protocol version the awaited peers must implement (or better).
-     * @return a future that will be triggered when the number of connected peers implementing protocolVersion or higher >= numPeers
+     * @return a future that will be triggered when the number of connected peers implementing protocolVersion or higher is greater than or equals numPeers
      */
     public ListenableFuture<List<Peer>> waitForPeersOfVersion(final int numPeers, final long protocolVersion) {
         List<Peer> foundPeers = findPeersOfAtLeastVersion(protocolVersion);
@@ -1965,7 +1951,7 @@ public class PeerGroup implements TransactionBroadcaster {
      *
      * @param numPeers How many peers to wait for.
      * @param mask An integer representing a bit mask that will be ANDed with the peers advertised service masks.
-     * @return a future that will be triggered when the number of connected peers implementing protocolVersion or higher >= numPeers
+     * @return a future that will be triggered when the number of connected peers implementing protocolVersion or higher is greater than or equals numPeers
      */
     public ListenableFuture<List<Peer>> waitForPeersWithServiceMask(final int numPeers, final int mask) {
         lock.lock();
@@ -2011,7 +1997,7 @@ public class PeerGroup implements TransactionBroadcaster {
      * enough, {@link PeerGroup#broadcastTransaction(Transaction)} will wait until the minimum number is reached so
      * propagation across the network can be observed. If no value has been set using
      * {@link PeerGroup#setMinBroadcastConnections(int)} a default of 80% of whatever
-     * {@link org.bitcoinj.core.PeerGroup#getMaxConnections()} returns is used.
+     * {@link PeerGroup#getMaxConnections()} returns is used.
      */
     public int getMinBroadcastConnections() {
         lock.lock();
@@ -2030,7 +2016,7 @@ public class PeerGroup implements TransactionBroadcaster {
     }
 
     /**
-     * See {@link org.bitcoinj.core.PeerGroup#getMinBroadcastConnections()}.
+     * See {@link PeerGroup#getMinBroadcastConnections()}.
      */
     public void setMinBroadcastConnections(int value) {
         lock.lock();
@@ -2053,7 +2039,7 @@ public class PeerGroup implements TransactionBroadcaster {
     /**
      * <p>Given a transaction, sends it un-announced to one peer and then waits for it to be received back from other
      * peers. Once all connected peers have announced the transaction, the future available via the
-     * {@link org.bitcoinj.core.TransactionBroadcast#future()} method will be completed. If anything goes
+     * {@link TransactionBroadcast#future()} method will be completed. If anything goes
      * wrong the exception will be thrown when get() is called, or you can receive it via a callback on the
      * {@link ListenableFuture}. This method returns immediately, so if you want it to block just call get() on the
      * result.</p>
@@ -2065,7 +2051,7 @@ public class PeerGroup implements TransactionBroadcaster {
      * A good choice for proportion would be between 0.5 and 0.8 but if you want faster transmission during initial
      * bringup of the peer group you can lower it.</p>
      *
-     * <p>The returned {@link org.bitcoinj.core.TransactionBroadcast} object can be used to get progress feedback,
+     * <p>The returned {@link TransactionBroadcast} object can be used to get progress feedback,
      * which is calculated by watching the transaction propagate across the network and be announced by peers.</p>
      */
     public TransactionBroadcast broadcastTransaction(final Transaction tx, final int minConnections) {
@@ -2116,7 +2102,7 @@ public class PeerGroup implements TransactionBroadcaster {
 
     /**
      * Returns the period between pings for an individual peer. Setting this lower means more accurate and timely ping
-     * times are available via {@link org.bitcoinj.core.Peer#getLastPingTime()} but it increases load on the
+     * times are available via {@link Peer#getLastPingTime()} but it increases load on the
      * remote node. It defaults to {@link PeerGroup#DEFAULT_PING_INTERVAL_MSEC}.
      */
     public long getPingIntervalMsec() {
@@ -2130,10 +2116,10 @@ public class PeerGroup implements TransactionBroadcaster {
 
     /**
      * Sets the period between pings for an individual peer. Setting this lower means more accurate and timely ping
-     * times are available via {@link org.bitcoinj.core.Peer#getLastPingTime()} but it increases load on the
+     * times are available via {@link Peer#getLastPingTime()} but it increases load on the
      * remote node. It defaults to {@link PeerGroup#DEFAULT_PING_INTERVAL_MSEC}.
-     * Setting the value to be <= 0 disables pinging entirely, although you can still request one yourself
-     * using {@link org.bitcoinj.core.Peer#ping()}.
+     * Setting the value to be smaller or equals 0 disables pinging entirely, although you can still request one yourself
+     * using {@link Peer#ping()}.
      */
     public void setPingIntervalMsec(long pingIntervalMsec) {
         lock.lock();
