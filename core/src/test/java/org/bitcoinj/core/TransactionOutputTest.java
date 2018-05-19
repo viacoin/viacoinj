@@ -67,7 +67,7 @@ public class TransactionOutputTest extends TestWithWallet {
 
     @Test
     public void testP2SHOutputScript() throws Exception {
-        String P2SHAddressString = "35b9vsyH1KoFT5a5KtrKusaCcPLkiSo1tU";
+        String P2SHAddressString = "EM43VvKLtNmnMDUW1eBFVPCEEWZAb8irBM";
         Address P2SHAddress = LegacyAddress.fromBase58(MAINNET, P2SHAddressString);
         Script script = ScriptBuilder.createOutputScript(P2SHAddress);
         Transaction tx = new Transaction(MAINNET);
