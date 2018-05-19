@@ -39,7 +39,7 @@ public class MainNetParams extends AbstractBitcoinNetParams {
         maxTarget = Utils.decodeCompactBits(0x1d00ffffL);
         dumpedPrivateKeyHeader = 128;
         addressHeader = 0;
-        p2shHeader = 5;
+        p2shHeader = 33;
         segwitAddressHrp = "bc";
         port = 5223;
         packetMagic = 0x0f68c6cb;
