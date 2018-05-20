@@ -51,7 +51,7 @@ public class MainNetParams extends AbstractBitcoinNetParams {
         majorityWindow = MAINNET_MAJORITY_WINDOW;
 
         genesisBlock.setDifficultyTarget(0x1e01ffffL);
-        genesisBlock.setTime(1231006505L);
+        genesisBlock.setTime(1397088621L);
         genesisBlock.setNonce(4016033);
         id = ID_MAINNET;
         subsidyDecreaseBlockCount = 657000;
