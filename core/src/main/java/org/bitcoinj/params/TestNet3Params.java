@@ -50,7 +50,7 @@ public class TestNet3Params extends AbstractBitcoinNetParams {
         addressHeader = 111;
         p2shHeader = 196;
         dumpedPrivateKeyHeader = 239;
-        segwitAddressHrp = "tb";
+        segwitAddressHrp = "tvia";
         genesisBlock.setTime(1296688602L);
         genesisBlock.setDifficultyTarget(0x1d00ffffL);
         genesisBlock.setNonce(414098458);
